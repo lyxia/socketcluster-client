@@ -24,6 +24,14 @@ var invalidSignedAuthToken = 'fakebGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fakec2VybmFtZ
 
 var TOKEN_EXPIRY_IN_SECONDS = 60 * 60 * 24 * 366 * 5000;
 
+var wait = function (duration) {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve();
+    }, duration);
+  });
+};
+
 var connectionHandler = function (socket) {
   async function handleLogin() {
     var rpc = await socket.procedure('login').once();
@@ -117,7 +125,7 @@ describe('Integration tests', function () {
   });
 
   describe('Creation', function () {
-    it('Should reuse socket if multiplex is true and options are the same', function (done) {
+    it('Should reuse socket if multiplex is true and options are the same', async function () {
       clientOptions = {
         hostname: '127.0.0.1',
         port: portNumber,
@@ -130,10 +138,9 @@ describe('Integration tests', function () {
       assert.equal(clientA, clientB);
       clientA.destroy();
       clientB.destroy();
-      done();
     });
 
-    it('Should automatically connect socket on creation by default', function (done) {
+    it('Should automatically connect socket on creation by default', async function () {
       clientOptions = {
         hostname: '127.0.0.1',
         port: portNumber,
@@ -143,10 +150,9 @@ describe('Integration tests', function () {
       client = socketClusterClient.create(clientOptions);
 
       assert.equal(client.state, client.CONNECTING);
-      done();
     });
 
-    it('Should not automatically connect socket if autoConnect is set to false', function (done) {
+    it('Should not automatically connect socket if autoConnect is set to false', async function () {
       clientOptions = {
         hostname: '127.0.0.1',
         port: portNumber,
@@ -157,10 +163,9 @@ describe('Integration tests', function () {
       client = socketClusterClient.create(clientOptions);
 
       assert.equal(client.state, client.CLOSED);
-      done();
     });
 
-    it('Should automatically connect socket if multiplex is true, autoConnect is set to false the first time and socket create is called with autoConnect true the second time', function (done) {
+    it('Should automatically connect socket if multiplex is true, autoConnect is set to false the first time and socket create is called with autoConnect true the second time', async function () {
       var clientOptionsA = {
         hostname: '127.0.0.1',
         port: portNumber,
@@ -185,11 +190,9 @@ describe('Integration tests', function () {
 
       clientA.destroy();
       clientB.destroy();
-
-      done();
     });
 
-    it('Should not automatically connect socket if multiplex is true, autoConnect is set to false and socket create is called a second time with autoConnect false', function (done) {
+    it('Should not automatically connect socket if multiplex is true, autoConnect is set to false and socket create is called a second time with autoConnect false', async function () {
       clientOptions = {
         hostname: '127.0.0.1',
         port: portNumber,
@@ -207,31 +210,32 @@ describe('Integration tests', function () {
 
       clientA.destroy();
       clientB.destroy();
-
-      done();
     });
   });
 
   describe('Errors', function () {
-    it('Should be able to emit the error event locally on the socket', function (done) {
+    it('Should be able to emit the error event locally on the socket', async function () {
       client = socketClusterClient.create(clientOptions);
       var error = null;
 
-      client.on('error', function (err) {
-        error = err;
-      });
+      (async () => {
+        for await (let err of client.listener('error')) {
+          error = err;
+        }
+      })();
 
-      client.on('connect', function () {
-        var error = new Error('Custom error');
-        error.name = 'CustomError';
-        client.emit('error', error);
-      });
+      (async () => {
+        for await (let status of client.listener('connect')) {
+          var error = new Error('Custom error');
+          error.name = 'CustomError';
+          client.emit('error', error);
+        }
+      })();
 
-      setTimeout(function () {
-        assert.notEqual(error, null);
-        assert.equal(error.name, 'CustomError');
-        done();
-      }, 100);
+      await wait(100);
+
+      assert.notEqual(error, null);
+      assert.equal(error.name, 'CustomError');
     });
   });
 
