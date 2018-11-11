@@ -25,46 +25,58 @@ var invalidSignedAuthToken = 'fakebGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fakec2VybmFtZ
 var TOKEN_EXPIRY_IN_SECONDS = 60 * 60 * 24 * 366 * 5000;
 
 var connectionHandler = function (socket) {
-  socket.once('login', function (userDetails, respond) {
-    if (allowedUsers[userDetails.username]) {
-      userDetails.exp = Math.round(Date.now() / 1000) + TOKEN_EXPIRY_IN_SECONDS;
-      socket.setAuthToken(userDetails);
-      respond();
+  async function handleLogin() {
+    var rpc = await socket.procedure('login').once();
+    if (allowedUsers[rpc.data.username]) {
+      rpc.data.exp = Math.round(Date.now() / 1000) + TOKEN_EXPIRY_IN_SECONDS;
+      socket.setAuthToken(rpc.data);
+      rpc.end();
     } else {
       var err = new Error('Failed to login');
       err.name = 'FailedLoginError';
-      respond(err);
+      rpc.error(err);
     }
-  });
-  socket.once('setAuthKey', function (newAuthKey, respond) {
-    server.signatureKey = newAuthKey;
-    server.verificationKey = newAuthKey;
-    respond();
-  });
-  socket.on('performTask', function (action, respond) {
-    setTimeout(function () {
-      respond();
-    }, 1000);
-  });
+  }
+  handleLogin();
+
+  async function handleSetAuthKey() {
+    var rpc = await socket.procedure('setAuthKey').once();
+    server.signatureKey = rpc.data;
+    server.verificationKey = rpc.data;
+    rpc.end();
+  }
+  handleSetAuthKey();
+
+  async function handlePerformTask() {
+    for await (let rpc of socket.procedure('performTask')) {
+      setTimeout(function () {
+        rpc.respond();
+      }, 1000);
+    }
+  }
+  handlePerformTask();
 };
 
 describe('Integration tests', function () {
-  beforeEach('Run the server before start', function (done) {
+  beforeEach('Run the server before start', async function () {
     serverOptions = {
       authKey: 'testkey',
       ackTimeout: 200
     };
 
     server = socketClusterServer.listen(portNumber, serverOptions);
-    server.on('connection', connectionHandler);
+    async function handleServerConnection() {
+      for await (let socket of server.listener('connection')) {
+        connectionHandler(socket);
+      }
+    }
+    handleServerConnection();
 
-    server.addMiddleware(server.MIDDLEWARE_AUTHENTICATE, function (req, next) {
+    server.addMiddleware(server.MIDDLEWARE_AUTHENTICATE, async function (req) {
       if (req.authToken.username === 'alice') {
         var err = new Error('Blocked by MIDDLEWARE_AUTHENTICATE');
         err.name = 'AuthenticateMiddlewareError';
-        next(err);
-      } else {
-        next();
+        throw err;
       }
     });
 
@@ -75,36 +87,33 @@ describe('Integration tests', function () {
       ackTimeout: 200
     };
 
-    server.once('ready', function () {
-      done();
-    });
+    await server.listener('ready').once();
   });
 
-  afterEach('Shut down server afterwards', function () {
+  afterEach('Shut down server afterwards', async function () {
     var cleanupTasks = [];
     global.localStorage.removeItem('socketCluster.authToken');
     if (client) {
       if (client.state !== client.CLOSED) {
-        cleanupTasks.push(new Promise(function (resolve, reject) {
-          client.once('disconnect', function () {
-            resolve();
-          });
-          client.once('connectAbort', function () {
-            resolve();
-          });
-        }));
+        cleanupTasks.push(
+          Promise.race([
+            client.listener('disconnect').once(),
+            client.listener('connectAbort').once()
+          ])
+        );
         client.destroy();
       } else {
         client.destroy();
       }
     }
-    cleanupTasks.push(new Promise(function (resolve) {
-      server.close(function () {
+    cleanupTasks.push(
+      server
+      .close()
+      .then(() => {
         portNumber++;
-        resolve();
-      });
-    }));
-    return Promise.all(cleanupTasks);
+      })
+    );
+    await Promise.all(cleanupTasks);
   });
 
   describe('Creation', function () {
