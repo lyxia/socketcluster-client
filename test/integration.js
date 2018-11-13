@@ -240,65 +240,61 @@ describe('Integration tests', function () {
   });
 
   describe('Authentication', function () {
-    it('Should not send back error if JWT is not provided in handshake', function (done) {
+    it('Should not send back error if JWT is not provided in handshake', async function () {
       client = socketClusterClient.create(clientOptions);
-      client.once('connect', function (status) {
-        assert.equal(status.authError === undefined, true);
-        done()
-      });
+      let status = await client.listener('connect').once();
+      assert.equal(status.authError === undefined, true);
     });
 
-    it('Should be authenticated on connect if previous JWT token is present', function (done) {
-      global.localStorage.setItem('socketCluster.authToken', validSignedAuthTokenBob);
-      client = socketClusterClient.create(clientOptions);
-      client.once('connect', function (statusA) {
-        assert.equal(client.authState, 'authenticated');
-        assert.equal(statusA.isAuthenticated, true);
-        assert.equal(statusA.authError === undefined, true);
-        done();
-      });
-    });
-
-    it('Should send back error if JWT is invalid during handshake', function (done) {
+    it('Should be authenticated on connect if previous JWT token is present', async function () {
       global.localStorage.setItem('socketCluster.authToken', validSignedAuthTokenBob);
       client = socketClusterClient.create(clientOptions);
 
-      client.once('connect', (statusA) => {
-        assert.notEqual(statusA, null);
-        assert.equal(statusA.isAuthenticated, true);
-        assert.equal(statusA.authError, null);
+      let event = await client.listener('connect').once();
+      assert.equal(client.authState, 'authenticated');
+      assert.equal(event.status.isAuthenticated, true);
+      assert.equal(event.status.authError === undefined, true);
+    });
 
-        assert.notEqual(client.signedAuthToken, null);
-        assert.notEqual(client.authToken, null);
+    it('Should send back error if JWT is invalid during handshake', async function () {
+      global.localStorage.setItem('socketCluster.authToken', validSignedAuthTokenBob);
+      client = socketClusterClient.create(clientOptions);
 
-        // Change the setAuthKey to invalidate the current token.
-        client.invoke('setAuthKey', 'differentAuthKey')
-        .then(() => {
-          client.once('disconnect', () => {
-            client.once('connect', (statusB) => {
-              assert.equal(statusB.isAuthenticated, false);
-              assert.notEqual(statusB.authError, null);
-              assert.equal(statusB.authError.name, 'AuthTokenInvalidError');
+      let event = await client.listener('connect').once();
+      assert.notEqual(event.status, null);
+      assert.equal(event.status.isAuthenticated, true);
+      assert.equal(event.status.authError, null);
 
-              // When authentication fails, the auth token properties on the client
-              // socket should be set to null; that way it's not going to keep
-              // throwing the same error every time the socket tries to connect.
-              assert.equal(client.signedAuthToken, null);
-              assert.equal(client.authToken, null);
+      assert.notEqual(client.signedAuthToken, null);
+      assert.notEqual(client.authToken, null);
 
-              // Set authKey back to what it was.
-              client.invoke('setAuthKey', serverOptions.authKey)
-              .then(() => {
-                done();
-              });
-            });
+      // Change the setAuthKey to invalidate the current token.
+      await client.invoke('setAuthKey', 'differentAuthKey');
 
-            client.connect();
-          });
+      // client.listener('disconnect').once(); // TODO 23 It shouldn't behave differently if this line is not here.
+      // client.listener('disconnect'); // TODO 23 It shouldn't behave differently if this line is not here.
 
-          client.disconnect();
-        });
-      });
+      client.disconnect();
+
+      await client.listener('disconnect').once();
+      console.log(33333333);// TODO 2333 TODO!!!: ^ Either use setTimeout inside SCClientSocket.prototype.emit or use a single stream for all listeners.
+
+      client.connect();
+
+      event = await client.listener('connect').once();
+
+      assert.equal(event.status.isAuthenticated, false);
+      assert.notEqual(event.status.authError, null);
+      assert.equal(event.status.authError.name, 'AuthTokenInvalidError');
+
+      // When authentication fails, the auth token properties on the client
+      // socket should be set to null; that way it's not going to keep
+      // throwing the same error every time the socket tries to connect.
+      assert.equal(client.signedAuthToken, null);
+      assert.equal(client.authToken, null);
+
+      // Set authKey back to what it was.
+      await client.invoke('setAuthKey', serverOptions.authKey);
     });
 
     it('Should allow switching between users', function (done) {
