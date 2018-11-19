@@ -277,7 +277,7 @@ describe('Integration tests', function () {
       client.disconnect();
 
       await client.listener('disconnect').once();
-      console.log(33333333);// TODO 2333 TODO!!!: ^ Either use setTimeout inside SCClientSocket.prototype.emit or use a single stream for all listeners.
+      console.log(33333333);// TODO 2333 TODO!!!!: ^ Either use setTimeout inside SCClientSocket.prototype.emit or use a single stream for all listeners.
 
       client.connect();
 
