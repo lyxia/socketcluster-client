@@ -4,8 +4,6 @@ var factory = require('./lib/factory');
 module.exports.factory = factory;
 module.exports.SCClientSocket = SCClientSocket;
 
-module.exports.Emitter = require('component-emitter');
-
 module.exports.create = function (options) {
   return factory.create(options);
 };
