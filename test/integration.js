@@ -426,62 +426,60 @@ describe('Integration tests', function () {
       ]);
     });
 
-    it('Should start out in pending authState and switch to unauthenticated if no token exists', function (done) {
+    it('Should start out in pending authState and switch to unauthenticated if no token exists', async function () {
       client = socketClusterClient.create(clientOptions);
       assert.equal(client.authState, 'unauthenticated');
 
-      var handler = function (status) {
+      (async () => {
+        let status = await client.listener('authStateChange').once();
         throw new Error('authState should not change after connecting without a token');
-      };
+      })();
 
-      client.once('authStateChange', handler);
-
-      setTimeout(function () {
-        client.off('authStateChange', handler);
-        done();
-      }, 1000);
+      await wait(1000);
     });
 
-    it('Should deal with auth engine errors related to saveToken function', function (done) {
+    it('Should deal with auth engine errors related to saveToken function', async function () {
       global.localStorage.setItem('socketCluster.authToken', validSignedAuthTokenBob);
       client = socketClusterClient.create(clientOptions);
 
       var caughtError;
-      client.on('error', function (err) {
-        caughtError = err;
-      });
 
-      client.once('connect', function () {
-        var oldSaveTokenFunction = client.auth.saveToken;
-        client.auth.saveToken = function (tokenName, tokenValue, options) {
-          var err = new Error('Failed to save token');
-          err.name = 'FailedToSaveTokenError';
-          return Promise.reject(err);
-        };
-        assert.notEqual(client.authToken, null);
-        assert.equal(client.authToken.username, 'bob');
+      (async () => {
+        for await (let err of client.listener('error')) {
+          caughtError = err;
+        }
+      })();
 
-        client.authenticate(validSignedAuthTokenKate)
-        .then(function (authStatus) {
-          assert.notEqual(authStatus, null);
-          // The error here comes from the client auth engine and does not prevent the
-          // authentication from taking place, it only prevents the token from being
-          // stored correctly on the client.
-          assert.equal(authStatus.isAuthenticated, true);
-          // authError should be null because the error comes from the client-side auth engine
-          // whereas authError is for server-side errors (e.g. JWT errors).
-          assert.equal(authStatus.authError, null);
+      await client.listener('connect').once();
 
-          assert.notEqual(client.authToken, null);
-          assert.equal(client.authToken.username, 'kate');
-          setTimeout(function () {
-            assert.notEqual(caughtError, null);
-            assert.equal(caughtError.name, 'FailedToSaveTokenError');
-            client.auth.saveToken = oldSaveTokenFunction;
-            done();
-          }, 10);
-        });
-      });
+      var oldSaveTokenFunction = client.auth.saveToken;
+      client.auth.saveToken = function (tokenName, tokenValue, options) {
+        var err = new Error('Failed to save token');
+        err.name = 'FailedToSaveTokenError';
+        return Promise.reject(err);
+      };
+      assert.notEqual(client.authToken, null);
+      assert.equal(client.authToken.username, 'bob');
+
+      let authStatus = await client.authenticate(validSignedAuthTokenKate);
+
+      assert.notEqual(authStatus, null);
+      // The error here comes from the client auth engine and does not prevent the
+      // authentication from taking place, it only prevents the token from being
+      // stored correctly on the client.
+      assert.equal(authStatus.isAuthenticated, true);
+      // authError should be null because the error comes from the client-side auth engine
+      // whereas authError is for server-side errors (e.g. JWT errors).
+      assert.equal(authStatus.authError, null);
+
+      assert.notEqual(client.authToken, null);
+      assert.equal(client.authToken.username, 'kate');
+
+      await wait(10);
+
+      assert.notEqual(caughtError, null);
+      assert.equal(caughtError.name, 'FailedToSaveTokenError');
+      client.auth.saveToken = oldSaveTokenFunction;
     });
 
     it('Should gracefully handle authenticate abortion due to disconnection', function (done) {
