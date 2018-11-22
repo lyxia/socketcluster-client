@@ -482,61 +482,66 @@ describe('Integration tests', function () {
       client.auth.saveToken = oldSaveTokenFunction;
     });
 
-    it('Should gracefully handle authenticate abortion due to disconnection', function (done) {
+    it('Should gracefully handle authenticate abortion due to disconnection', async function () {
       client = socketClusterClient.create(clientOptions);
 
-      client.once('connect', function (statusA) {
-        client.authenticate(validSignedAuthTokenBob)
-        .catch(function (err) {
-          assert.notEqual(err, null);
-          assert.equal(err.name, 'BadConnectionError');
-          assert.equal(client.authState, 'unauthenticated');
-          done();
-        });
-        client.disconnect();
-      });
+      await client.listener('connect').once();
+
+      let authenticatePromise = await client.authenticate(validSignedAuthTokenBob);
+      client.disconnect();
+
+      try {
+        await authenticatePromise;
+      } catch (err) {
+        assert.notEqual(err, null);
+        assert.equal(err.name, 'BadConnectionError');
+        assert.equal(client.authState, 'unauthenticated');
+      }
     });
 
-    it('Should go through the correct sequence of authentication state changes when dealing with disconnections; part 1', function (done) {
+    it('Should go through the correct sequence of authentication state changes when dealing with disconnections; part 1', async function () {
       client = socketClusterClient.create(clientOptions);
 
       var expectedAuthStateChanges = [
         'unauthenticated->authenticated'
       ];
       var authStateChanges = [];
-      client.on('authStateChange', (status) => {
-        authStateChanges.push(status.oldState + '->' + status.newState);
-      });
+
+      (async () => {
+        for await (status of client.listener('authStateChange')) {
+          authStateChanges.push(status.oldState + '->' + status.newState);
+        }
+      })();
 
       assert.equal(client.authState, 'unauthenticated');
 
-      client.once('connect', (statusA) => {
-        client.once('authenticate', (newSignedToken) => {
-          client.once('disconnect', () => {
-            assert.equal(client.authState, 'authenticated');
-            client.authenticate(newSignedToken)
-            .then((newSignedToken) => {
-              assert.equal(client.authState, 'authenticated');
-              assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
-              client.off('authStateChange');
-              done();
-            });
-            assert.equal(client.authState, 'authenticated');
-          });
-          assert.equal(client.authState, 'authenticated');
-          // In case of disconnection, the socket maintains the last known auth state.
-          assert.equal(client.authState, 'authenticated');
-        });
-        assert.equal(client.authState, 'unauthenticated');
-        client.invoke('login', {username: 'bob'})
-        .then(() => {
-          client.disconnect();
-        });
-        assert.equal(client.authState, 'unauthenticated');
-      });
+      await client.listener('connect').once();
+      assert.equal(client.authState, 'unauthenticated');
+
+      (async () => {
+        await client.invoke('login', {username: 'bob'});
+        client.disconnect();
+      })();
+
+      assert.equal(client.authState, 'unauthenticated');
+
+      let newSignedToken = await client.listener('authenticate').once();
+
+      assert.equal(client.authState, 'authenticated');
+
+      await client.listener('disconnect').once();
+
+      // In case of disconnection, the socket maintains the last known auth state.
+      assert.equal(client.authState, 'authenticated');
+
+      await client.authenticate(newSignedToken);
+
+      assert.equal(client.authState, 'authenticated');
+      assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
+      client.endListener('authStateChange');
     });
 
-    it('Should go through the correct sequence of authentication state changes when dealing with disconnections; part 2', function (done) {
+    it('Should go through the correct sequence of authentication state changes when dealing with disconnections; part 2', async function () {
       global.localStorage.setItem('socketCluster.authToken', validSignedAuthTokenBob);
       client = socketClusterClient.create(clientOptions);
 
@@ -547,33 +552,41 @@ describe('Integration tests', function () {
         'authenticated->unauthenticated'
       ];
       var authStateChanges = [];
-      client.on('authStateChange', (status) => {
-        authStateChanges.push(status.oldState + '->' + status.newState);
-      });
+
+      (async () => {
+        for await (status of client.listener('authStateChange')) {
+          authStateChanges.push(status.oldState + '->' + status.newState);
+        }
+      })();
 
       assert.equal(client.authState, 'unauthenticated');
 
-      client.once('connect', (statusA) => {
-        assert.equal(client.authState, 'authenticated');
-        client.deauthenticate();
-        assert.equal(client.authState, 'unauthenticated');
-        client.authenticate(validSignedAuthTokenBob)
-        .then(() => {
-          assert.equal(client.authState, 'authenticated');
-          client.once('disconnect', () => {
-            assert.equal(client.authState, 'authenticated');
-            client.deauthenticate();
-            assert.equal(client.authState, 'unauthenticated');
-            assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
-            done();
-          });
-          client.disconnect();
-        });
-        assert.equal(client.authState, 'unauthenticated');
-      });
+      await client.listener('connect').once();
+
+      assert.equal(client.authState, 'authenticated');
+      client.deauthenticate();
+      assert.equal(client.authState, 'unauthenticated');
+      let authenticatePromise = client.authenticate(validSignedAuthTokenBob);
+      assert.equal(client.authState, 'unauthenticated');
+
+      await authenticatePromise;
+
+      assert.equal(client.authState, 'authenticated');
+
+      let disconnectPromise = client.listener('disconnect').once();
+      client.disconnect();
+      await disconnectPromise;
+
+      assert.equal(client.authState, 'authenticated');
+      client.deauthenticate();
+      assert.equal(client.authState, 'unauthenticated');
+
+      await client.listener('authStateChange').once();
+
+      assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
     });
 
-    it('Should go through the correct sequence of authentication state changes when dealing with disconnections; part 3', function (done) {
+    it('Should go through the correct sequence of authentication state changes when dealing with disconnections; part 3', async function () {
       global.localStorage.setItem('socketCluster.authToken', validSignedAuthTokenBob);
       client = socketClusterClient.create(clientOptions);
 
@@ -582,27 +595,32 @@ describe('Integration tests', function () {
         'authenticated->unauthenticated'
       ];
       var authStateChanges = [];
-      client.on('authStateChange', (status) => {
-        authStateChanges.push(status.oldState + '->' + status.newState);
-      });
+
+      (async () => {
+        for await (let status of client.listener('authStateChange')) {
+          authStateChanges.push(status.oldState + '->' + status.newState);
+        }
+      })();
 
       assert.equal(client.authState, 'unauthenticated');
 
-      client.once('connect', (statusA) => {
-        assert.equal(client.authState, 'authenticated');
-        client.authenticate(invalidSignedAuthToken)
-        .catch((err) => {
-          assert.notEqual(err, null);
-          assert.equal(err.name, 'AuthTokenInvalidError');
-          assert.equal(client.authState, 'unauthenticated');
-          assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
-          done();
-        });
-        assert.equal(client.authState, 'authenticated');
-      });
+      await client.listener('connect').once();
+
+      assert.equal(client.authState, 'authenticated');
+      let authenticatePromise = client.authenticate(invalidSignedAuthToken);
+      assert.equal(client.authState, 'authenticated');
+
+      try {
+        await authenticatePromise;
+      } catch (err) {
+        assert.notEqual(err, null);
+        assert.equal(err.name, 'AuthTokenInvalidError');
+        assert.equal(client.authState, 'unauthenticated');
+        assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
+      }
     });
 
-    it('Should go through the correct sequence of authentication state changes when authenticating as a user while already authenticated as another user', function (done) {
+    it('Should go through the correct sequence of authentication state changes when authenticating as a user while already authenticated as another user', async function () {
       global.localStorage.setItem('socketCluster.authToken', validSignedAuthTokenBob);
       client = socketClusterClient.create(clientOptions);
 
@@ -610,37 +628,49 @@ describe('Integration tests', function () {
         'unauthenticated->authenticated'
       ];
       var authStateChanges = [];
-      client.on('authStateChange', function (status) {
-        authStateChanges.push(status.oldState + '->' + status.newState);
-      });
+
+      (async () => {
+        for await (let status of client.listener('authStateChange')) {
+          authStateChanges.push(status.oldState + '->' + status.newState);
+        }
+      })();
 
       var expectedAuthTokenChanges = [
         validSignedAuthTokenBob,
         validSignedAuthTokenKate
       ];
       var authTokenChanges = [];
-      client.on('authenticate', function () {
-        authTokenChanges.push(client.signedAuthToken);
-      });
-      client.on('deauthenticate', function () {
-        authTokenChanges.push(client.signedAuthToken);
-      });
+
+      (async () => {
+        for await (let packet of client.listener('authenticate')) {
+          authTokenChanges.push(client.signedAuthToken);
+        }
+      })();
+
+      (async () => {
+        for await (let packet of client.listener('deauthenticate')) {
+          authTokenChanges.push(client.signedAuthToken);
+        }
+      })();
 
       assert.equal(client.authState, 'unauthenticated');
 
-      client.once('connect', function (statusA) {
-        assert.equal(client.authState, 'authenticated');
-        assert.equal(client.authToken.username, 'bob');
-        client.authenticate(validSignedAuthTokenKate)
-        .then(function () {
-          assert.equal(client.authState, 'authenticated');
-          assert.equal(client.authToken.username, 'kate');
-          assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
-          assert.equal(JSON.stringify(authTokenChanges), JSON.stringify(expectedAuthTokenChanges));
-          done();
-        });
-        assert.equal(client.authState, 'authenticated');
-      });
+      await client.listener('connect').once();
+
+      assert.equal(client.authState, 'authenticated');
+      assert.equal(client.authToken.username, 'bob');
+      let authenticatePromise = client.authenticate(validSignedAuthTokenKate);
+
+      assert.equal(client.authState, 'authenticated');
+
+      await authenticatePromise;
+
+      // TODO 2: When the authenticatePromise resolves, the client.listener('authenticate') hasn't yet triggered.
+
+      assert.equal(client.authState, 'authenticated');
+      assert.equal(client.authToken.username, 'kate');
+      assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
+      assert.equal(JSON.stringify(authTokenChanges), JSON.stringify(expectedAuthTokenChanges));
     });
 
     it('Should wait for socket to be authenticated before subscribing to waitForAuth channel', function (done) {
