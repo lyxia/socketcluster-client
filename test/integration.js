@@ -671,27 +671,26 @@ describe('Integration tests', function () {
       assert.equal(JSON.stringify(authTokenChanges), JSON.stringify(expectedAuthTokenChanges));
     });
 
-    it('Should wait for socket to be authenticated before subscribing to waitForAuth channel', function (done) {
+    it('Should wait for socket to be authenticated before subscribing to waitForAuth channel', async function () {
       client = socketClusterClient.create(clientOptions);
+
       var privateChannel = client.subscribe('priv', {waitForAuth: true});
       assert.equal(privateChannel.state, 'pending');
 
-      client.once('connect', function (statusA) {
-        assert.equal(privateChannel.state, 'pending');
-        privateChannel.once('subscribe', function () {
-          assert.equal(privateChannel.state, 'subscribed');
-          client.once('disconnect', function () {
-            assert.equal(privateChannel.state, 'pending');
-            privateChannel.once('subscribe', function () {
-              assert.equal(privateChannel.state, 'subscribed');
-              done();
-            });
-            client.authenticate(validSignedAuthTokenBob);
-          });
-          client.disconnect();
-        });
-        client.invoke('login', {username: 'bob'});
-      });
+      await client.listener('connect').once();
+      assert.equal(privateChannel.state, 'pending');
+
+      client.invoke('login', {username: 'bob'});
+      await client.listener('subscribe').once();
+      assert.equal(privateChannel.state, 'subscribed');
+
+      client.disconnect();
+      await client.listener('disconnect').once();
+      assert.equal(privateChannel.state, 'pending');
+
+      client.authenticate(validSignedAuthTokenBob);
+      await client.listener('subscribe').once();
+      assert.equal(privateChannel.state, 'subscribed');
     });
 
     it('Subscriptions (including those with waitForAuth option) should have priority over the authenticate action', function (done) {
