@@ -385,7 +385,7 @@ describe('Integration tests', function () {
       assert.equal(client.authToken.username, 'bob');
     });
 
-    it('Should still work if token verification is asynchronous', async function () {
+    it('If token verification is synchronous, authentication can be captured using the authenticate event', async function () {
       var port = 8511;
       server = socketClusterServer.listen(port, {
         authKey: serverOptions.authKey,
@@ -411,7 +411,6 @@ describe('Integration tests', function () {
         (async () => {
           await client.listener('authenticate').once();
           await client.listener('disconnect').once();
-
           client.connect();
           let packet = await client.listener('connect').once();
 
@@ -693,7 +692,7 @@ describe('Integration tests', function () {
       assert.equal(privateChannel.state, 'subscribed');
     });
 
-    it('Subscriptions (including those with waitForAuth option) should have priority over the authenticate action', function (done) {
+    it('Subscriptions (including those with waitForAuth option) should have priority over the authenticate action', async function () {
       global.localStorage.setItem('socketCluster.authToken', validSignedAuthTokenBob);
       client = socketClusterClient.create(clientOptions);
 
@@ -703,57 +702,67 @@ describe('Integration tests', function () {
       ];
       var initialSignedAuthToken;
       var authStateChanges = [];
-      client.on('authStateChange', (status) => {
-        authStateChanges.push(status.oldState + '->' + status.newState);
-      });
 
-      client.authenticate(invalidSignedAuthToken)
-      .then(() => {
-        return null;
-      })
-      .catch((err) => {
-        return err;
-      })
-      .then((err) => {
-        assert.notEqual(err, null);
-        assert.equal(err.name, 'AuthTokenInvalidError');
-      });
+      (async () => {
+        for await (let status of client.listener('authStateChange')) {
+          authStateChanges.push(status.oldState + '->' + status.newState);
+        }
+      })();
+
+      (async () => {
+        let error = null;
+        try {
+          await client.authenticate(invalidSignedAuthToken);
+        } catch (err) {
+          error = err;
+        }
+        assert.notEqual(error, null);
+        assert.equal(error.name, 'AuthTokenInvalidError');
+      })();
 
       var privateChannel = client.subscribe('priv', {waitForAuth: true});
       assert.equal(privateChannel.state, 'pending');
 
-      client.once('connect', (statusA) => {
+      (async () => {
+        let packet = await client.listener('connect').once();
         initialSignedAuthToken = client.signedAuthToken;
-        assert.equal(statusA.isAuthenticated, true);
+        assert.equal(packet.status.isAuthenticated, true);
         assert.equal(privateChannel.state, 'pending');
-        privateChannel.once('subscribeFail', (err) => {
-          // This shouldn't happen because the subscription should be
-          // processed before the authenticate() call with the invalid token fails.
-          throw new Error('Failed to subscribe to channel: ' + err.message);
-        });
-        privateChannel.once('subscribe', (err) => {
-          assert.equal(privateChannel.state, 'subscribed');
-        });
-      });
 
-      client.once('deauthenticate', (oldSignedToken) => {
+        await Promise.race([
+          (async () => {
+            let err = await privateChannel.listener('subscribeFail').once();
+            // This shouldn't happen because the subscription should be
+            // processed before the authenticate() call with the invalid token fails.
+            throw new Error('Failed to subscribe to channel: ' + err.message);
+          })(),
+          (async () => {
+            await privateChannel.listener('subscribe').once();
+            assert.equal(privateChannel.state, 'subscribed');
+          })()
+        ]);
+      })();
+
+      (async () => {
         // The subscription already went through so it should still be subscribed.
-        assert.equal(privateChannel.state, 'subscribed');
+        let oldSignedToken = await client.listener('deauthenticate').once();
+        // The subscription already went through so it should still be subscribed.
+        assert.equal(privateChannel.state, 'pending');
         assert.equal(client.authState, 'unauthenticated');
         assert.equal(client.authToken, null);
         assert.equal(oldSignedToken, initialSignedAuthToken);
 
         var privateChannel2 = client.subscribe('priv2', {waitForAuth: true});
-        privateChannel2.once('subscribe', () => {
-          throw new Error('Should not subscribe because the socket is not authenticated');
-        });
-      });
 
-      setTimeout(() => {
-        client.off('authStateChange');
-        assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
-        done();
-      }, 1000);
+        await privateChannel2.listener('subscribe').once();
+
+        // This line should not execute.
+        throw new Error('Should not subscribe because the socket is not authenticated');
+      })();
+
+      await wait(1000);
+      client.endListener('authStateChange');
+      assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
     });
 
     it('Should trigger the close event if the socket disconnects in the middle of the handshake phase', function (done) {
