@@ -765,58 +765,68 @@ describe('Integration tests', function () {
       assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
     });
 
-    it('Should trigger the close event if the socket disconnects in the middle of the handshake phase', function (done) {
+    it('Should trigger the close event if the socket disconnects in the middle of the handshake phase', async function () {
       client = socketClusterClient.create(clientOptions);
       var aborted = false;
       var diconnected = false;
       var closed = false;
 
-      client.on('connectAbort', function () {
+      (async () => {
+        await client.listener('connectAbort').once();
         aborted = true;
-      });
-      client.on('disconnect', function () {
+      })();
+
+      (async () => {
+        await client.listener('disconnect').once();
         diconnected = true;
-      });
-      client.on('close', function () {
+      })();
+
+      (async () => {
+        await client.listener('close').once();
         closed = true;
-      });
+      })();
 
       client.disconnect();
 
-      setTimeout(function () {
-        assert.equal(aborted, true);
-        assert.equal(diconnected, false);
-        assert.equal(closed, true);
-        done();
-      }, 300);
+      await wait(300);
+
+      assert.equal(aborted, true);
+      assert.equal(diconnected, false);
+      assert.equal(closed, true);
     });
 
-    it('Should trigger the close event if the socket disconnects after the handshake phase', function (done) {
+    it('Should trigger the close event if the socket disconnects after the handshake phase', async function () {
       client = socketClusterClient.create(clientOptions);
       var aborted = false;
       var diconnected = false;
       var closed = false;
 
-      client.on('connectAbort', function () {
+      (async () => {
+        await client.listener('connectAbort').once();
         aborted = true;
-      });
-      client.on('disconnect', function () {
+      })();
+
+      (async () => {
+        await client.listener('disconnect').once();
         diconnected = true;
-      });
-      client.on('close', function () {
+      })();
+
+      (async () => {
+        await client.listener('close').once();
         closed = true;
-      });
+      })();
 
-      client.on('connect', function () {
-        client.disconnect();
-      });
+      (async () => {
+        for await (let packet of client.listener('connect')) {
+          client.disconnect();
+        }
+      })();
 
-      setTimeout(function () {
-        assert.equal(aborted, false);
-        assert.equal(diconnected, true);
-        assert.equal(closed, true);
-        done();
-      }, 300);
+      await wait(300);
+
+      assert.equal(aborted, false);
+      assert.equal(diconnected, true);
+      assert.equal(closed, true);
     });
   });
 
