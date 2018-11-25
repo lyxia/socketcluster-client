@@ -665,8 +665,6 @@ describe('Integration tests', function () {
 
       await authenticatePromise;
 
-      // TODO 2: When the authenticatePromise resolves, the client.listener('authenticate') hasn't yet triggered.
-
       assert.equal(client.authState, 'authenticated');
       assert.equal(client.authToken.username, 'kate');
       assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
