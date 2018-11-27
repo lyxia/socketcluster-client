@@ -58,7 +58,7 @@ var connectionHandler = function (socket) {
   async function handlePerformTask() {
     for await (let rpc of socket.procedure('performTask')) {
       setTimeout(function () {
-        rpc.respond();
+        rpc.end();
       }, 1000);
     }
   }
@@ -572,9 +572,8 @@ describe('Integration tests', function () {
 
       assert.equal(client.authState, 'authenticated');
 
-      let disconnectPromise = client.listener('disconnect').once();
       client.disconnect();
-      await disconnectPromise;
+      await client.listener('disconnect').once();
 
       assert.equal(client.authState, 'authenticated');
       client.deauthenticate();
@@ -831,77 +830,86 @@ describe('Integration tests', function () {
   });
 
   describe('Emitting remote events', function () {
-    it('Should not throw error on socket if ackTimeout elapses before response to event is sent back', function (done) {
+    it('Should not throw error on socket if ackTimeout elapses before response to event is sent back', async function () {
       client = socketClusterClient.create(clientOptions);
 
       var caughtError;
-
       var clientError;
-      client.on('error', (err) => {
-        clientError = err;
-      });
+
+      (async () => {
+        for await (let err of client.listener('error')) {
+          clientError = err;
+        }
+      })();
 
       var responseError;
 
-      client.on('connect', () => {
-        client.invoke('performTask', 123)
-        .catch((err) => {
-          responseError = err;
-        });
-        setTimeout(() => {
+      (async () => {
+        for await (let packet of client.listener('connect')) {
+          try {
+            await client.invoke('performTask', 123);
+          } catch (err) {
+            responseError = err;
+          }
+          await wait(250);
           try {
             client.disconnect();
           } catch (e) {
             caughtError = e;
           }
-        }, 250);
-      });
+        }
+      })();
 
-      setTimeout(() => {
-        assert.notEqual(responseError, null);
-        assert.equal(caughtError, null);
-        done();
-      }, 300);
+      await wait(300);
+
+      assert.notEqual(responseError, null);
+      assert.equal(caughtError, null);
     });
   });
 
   describe('Reconnecting socket', function () {
-    it('Should disconnect socket with code 1000 and reconnect', function (done) {
+    it('Should disconnect socket with code 1000 and reconnect', async function () {
       client = socketClusterClient.create(clientOptions);
 
-      client.once('connect', function () {
-        var disconnectCode;
-        var disconnectReason;
-        client.once('disconnect', function (code, reason) {
-          disconnectCode = code;
-          disconnectReason = reason;
-        });
-        client.once('connect', function () {
-          assert.equal(disconnectCode, 1000);
-          assert.equal(disconnectReason, undefined);
-          done();
-        });
-        client.reconnect();
-      });
+      await client.listener('connect').once();
+
+      var disconnectCode;
+      var disconnectReason;
+
+      (async () => {
+        for await (let packet of client.listener('disconnect')) {
+          disconnectCode = packet.code;
+          disconnectReason = packet.reason;
+        }
+      })();
+
+      client.reconnect();
+      await client.listener('connect').once();
+
+      assert.equal(disconnectCode, 1000);
+      assert.equal(disconnectReason, undefined);
     });
 
-    it('Should disconnect socket with custom code and data when socket.reconnect() is called with arguments', function (done) {
+    it('Should disconnect socket with custom code and data when socket.reconnect() is called with arguments', async function () {
       client = socketClusterClient.create(clientOptions);
 
-      client.once('connect', function () {
-        var disconnectCode;
-        var disconnectReason;
-        client.once('disconnect', function (code, reason) {
-          disconnectCode = code;
-          disconnectReason = reason;
-        });
-        client.once('connect', function () {
-          assert.equal(disconnectCode, 1000);
-          assert.equal(disconnectReason, 'About to reconnect');
-          done();
-        });
-        client.reconnect(1000, 'About to reconnect');
-      });
+      await client.listener('connect').once();
+
+      var disconnectCode;
+      var disconnectReason;
+
+      (async () => {
+        let packet = await client.listener('disconnect').once();
+        disconnectCode = packet.code;
+        disconnectReason = packet.data;
+      })();
+
+
+      client.reconnect(1000, 'About to reconnect');
+      await client.listener('connect').once();
+
+      assert.equal(disconnectCode, 1000);
+      assert.equal(disconnectReason, 'About to reconnect');
     });
   });
 
