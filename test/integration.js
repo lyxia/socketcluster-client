@@ -271,9 +271,8 @@ describe('Integration tests', function () {
       // Change the setAuthKey to invalidate the current token.
       await client.invoke('setAuthKey', 'differentAuthKey');
 
-      client.disconnect();
+      await client.disconnect();
 
-      await client.listener('disconnect').once();
 
       client.connect();
 
@@ -325,7 +324,7 @@ describe('Integration tests', function () {
       assert.equal(authStateChangeTriggered, false);
     });
 
-    it('Token should be available by the time the login Promise resolves if token engine signing is synchronous', async function () {
+    it('If token engine signing is synchronous, authentication can be captured using the authenticate event', async function () {
       var port = 8509;
       server = socketClusterServer.listen(port, {
         authKey: serverOptions.authKey,
@@ -348,6 +347,7 @@ describe('Integration tests', function () {
       await client.listener('connect').once();
 
       await client.invoke('login', {username: 'bob'});
+      await client.listener('authenticate').once();
 
       assert.equal(client.authState, 'authenticated');
       assert.notEqual(client.authToken, null);
@@ -409,6 +409,11 @@ describe('Integration tests', function () {
 
       await Promise.all([
         (async () => {
+          await client.invoke('login', {username: 'bob'});
+          await client.listener('authenticate').once();
+          client.disconnect();
+        })(),
+        (async () => {
           await client.listener('authenticate').once();
           await client.listener('disconnect').once();
           client.connect();
@@ -417,10 +422,6 @@ describe('Integration tests', function () {
           assert.equal(packet.status.isAuthenticated, true);
           assert.notEqual(client.authToken, null);
           assert.equal(client.authToken.username, 'bob');
-        })(),
-        (async () => {
-          await client.invoke('login', {username: 'bob'});
-          client.disconnect();
         })()
       ]);
     });
@@ -519,6 +520,7 @@ describe('Integration tests', function () {
 
       (async () => {
         await client.invoke('login', {username: 'bob'});
+        await client.listener('authenticate').once();
         client.disconnect();
       })();
 
@@ -572,14 +574,11 @@ describe('Integration tests', function () {
 
       assert.equal(client.authState, 'authenticated');
 
-      client.disconnect();
-      await client.listener('disconnect').once();
+      await client.disconnect();
 
       assert.equal(client.authState, 'authenticated');
-      client.deauthenticate();
+      await client.deauthenticate();
       assert.equal(client.authState, 'unauthenticated');
-
-      await client.listener('authStateChange').once();
 
       assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
     });
@@ -682,8 +681,9 @@ describe('Integration tests', function () {
       await client.listener('subscribe').once();
       assert.equal(privateChannel.state, 'subscribed');
 
+      let disconnectPromise = client.listener('disconnect').once();
       client.disconnect();
-      await client.listener('disconnect').once();
+      await disconnectPromise;
       assert.equal(privateChannel.state, 'pending');
 
       client.authenticate(validSignedAuthTokenBob);
@@ -746,7 +746,7 @@ describe('Integration tests', function () {
         // The subscription already went through so it should still be subscribed.
         let oldSignedToken = await client.listener('deauthenticate').once();
         // The subscription already went through so it should still be subscribed.
-        assert.equal(privateChannel.state, 'pending');
+        assert.equal(privateChannel.state, 'subscribed'); // TODO 2222233333 TODO 4
         assert.equal(client.authState, 'unauthenticated');
         assert.equal(client.authToken, null);
         assert.equal(oldSignedToken, initialSignedAuthToken);
