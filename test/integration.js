@@ -914,163 +914,187 @@ describe('Integration tests', function () {
   });
 
   describe('Destroying socket', function () {
-    it('Should disconnect socket when socket.destroy() is called', function (done) {
+    it('Should disconnect socket when socket.destroy() is called', async function () {
       client = socketClusterClient.create(clientOptions);
 
       var clientError;
-      client.on('error', function (err) {
-        clientError = err;
-      });
+      (async () => {
+        for await (let err of client.listener('error')) {
+          clientError = err;
+        }
+      })();
 
-      client.on('connect', function () {
-        client.destroy();
-      });
+      (async () => {
+        for await (let packet of client.listener('connect')) {
+          client.destroy();
+        }
+      })();
 
-      client.on('disconnect', function () {
-        done();
-      });
+      await client.listener('disconnect').once();
     });
 
-    it('Should disconnect socket with custom code and data when socket.destroy() is called with arguments', function (done) {
+    it('Should disconnect socket with custom code and data when socket.destroy() is called with arguments', async function () {
       client = socketClusterClient.create(clientOptions);
 
       var clientError;
-      client.on('error', function (err) {
-        clientError = err;
-      });
+      (async () => {
+        for await (let err of client.listener('error')) {
+          clientError = err;
+        }
+      })();
 
-      client.on('connect', function () {
-        client.destroy(4321, 'Custom disconnect reason');
-      });
+      (async () => {
+        for await (let packet of client.listener('connect')) {
+          client.destroy(4321, 'Custom disconnect reason');
+        }
+      })();
 
-      client.on('disconnect', function (code, reason) {
-        assert.equal(code, 4321);
-        assert.equal(reason, 'Custom disconnect reason');
-        done();
-      });
+      let packet = await client.listener('disconnect').once();
+      assert.equal(packet.code, 4321);
+      assert.equal(packet.data, 'Custom disconnect reason'); // TODO 2: Should it be packet.reason or packet.data
     });
 
-    it('Should destroy all references of socket when socket.destroy() is called before connect', function (done) {
+    it('Should destroy all references of socket when socket.destroy() is called before connect', async function () {
       client = socketClusterClient.create(clientOptions);
 
       var clientError;
-      client.on('error', function (err) {
-        clientError = err;
-      });
+      (async () => {
+        for await (let err of client.listener('error')) {
+          clientError = err;
+        }
+      })();
 
       var connectAbortTriggered = false;
       var disconnectTriggered = false;
       var closeTriggered = false;
 
-      client.on('connectAbort', function (n) {
-        connectAbortTriggered = true;
-      });
+      (async () => {
+        for await (let packet of client.listener('connectAbort')) {
+          connectAbortTriggered = true;
+        }
+      })();
 
-      client.on('disconnect', function (n) {
-        disconnectTriggered = true;
-      });
+      (async () => {
+        for await (let packet of client.listener('disconnect')) {
+          disconnectTriggered = true;
+        }
+      })();
 
-      client.on('close', function (n) {
-        closeTriggered = true;
-      });
+      (async () => {
+        for await (let packet of client.listener('close')) {
+          closeTriggered = true;
+        }
+      })();
 
       assert.equal(Object.keys(socketClusterClient.clients).length, 1);
       assert.equal(socketClusterClient.clients[client.clientId] === client, true);
 
-      client.destroy();
+      await client.destroy();
 
       assert.equal(Object.keys(socketClusterClient.clients).length, 0);
       assert.equal(socketClusterClient.clients[client.clientId], null);
       assert.equal(connectAbortTriggered, true);
       assert.equal(disconnectTriggered, false);
       assert.equal(closeTriggered, true);
-      done();
     });
 
-    it('Should destroy all references of socket when socket.destroy() is called after connect', function (done) {
+    it('Should destroy all references of socket when socket.destroy() is called after connect', async function () {
       client = socketClusterClient.create(clientOptions);
 
       var clientError;
-      client.on('error', function (err) {
-        clientError = err;
-      });
+      (async () => {
+        for await (let err of client.listener('error')) {
+          clientError = err;
+        }
+      })();
 
       var connectAbortTriggered = false;
       var disconnectTriggered = false;
       var closeTriggered = false;
 
-      client.on('connectAbort', function (n) {
-        connectAbortTriggered = true;
-      });
+      (async () => {
+        for await (let packet of client.listener('connectAbort')) {
+          connectAbortTriggered = true;
+        }
+      })();
 
-      client.on('disconnect', function (n) {
-        disconnectTriggered = true;
-      });
+      (async () => {
+        for await (let packet of client.listener('disconnect')) {
+          disconnectTriggered = true;
+        }
+      })();
 
-      client.on('close', function (n) {
-        closeTriggered = true;
-      });
+      (async () => {
+        for await (let packet of client.listener('close')) {
+          closeTriggered = true;
+        }
+      })();
 
       assert.equal(Object.keys(socketClusterClient.clients).length, 1);
       assert.equal(socketClusterClient.clients[client.clientId] === client, true);
 
-      client.on('connect', function () {
-        client.destroy();
-        assert.equal(Object.keys(socketClusterClient.clients).length, 0);
-        assert.equal(socketClusterClient.clients[client.clientId], null);
-        assert.equal(connectAbortTriggered, false);
-        assert.equal(disconnectTriggered, true);
-        assert.equal(closeTriggered, true);
-        done();
-      });
+      (async () => {
+        for await (let packet of client.listener('connect')) {
+          client.destroy();
+          assert.equal(Object.keys(socketClusterClient.clients).length, 0);
+          assert.equal(socketClusterClient.clients[client.clientId], null);
+          assert.equal(connectAbortTriggered, false);
+          assert.equal(disconnectTriggered, true);
+          assert.equal(closeTriggered, true);
+        }
+      })();
     });
 
-    it('Should destroy all references of multiplexed socket when socket.destroy() is called', function (done) {
+    it('Should destroy all references of multiplexed socket when socket.destroy() is called', async function () {
       clientOptions.multiplex = true;
       var clientA = socketClusterClient.create(clientOptions);
       var clientB = socketClusterClient.create(clientOptions);
 
       var clientAError;
-      clientA.on('error', function (err) {
-        clientAError = err;
-      });
+      (async () => {
+        for await (let err of client.listener('error')) {
+          clientAError = err;
+        }
+      })();
 
       var clientBError;
-      clientB.on('error', function (err) {
-        clientBError = err;
-      });
+      (async () => {
+        for await (let err of client.listener('error')) {
+          clientBError = err;
+        }
+      })();
 
       assert.equal(clientA, clientB);
 
       assert.equal(Object.keys(socketClusterClient.clients).length, 1);
       assert.equal(socketClusterClient.clients[clientA.clientId] === clientA, true);
 
-      clientA.destroy();
+      await clientA.destroy();
 
       assert.equal(Object.keys(socketClusterClient.clients).length, 0);
       assert.equal(socketClusterClient.clients[clientA.clientId], null);
-      done();
     });
 
-    it('Should destroy all references of socket when socketClusterClient.destroy(socket) is called', function (done) {
+    it('Should destroy all references of socket when socketClusterClient.destroy(socket) is called', async function () {
       client = socketClusterClient.create(clientOptions);
 
       var clientError;
-      client.on('error', function (err) {
-        clientError = err;
-      });
+      (async () => {
+        for await (let err of client.listener('error')) {
+          clientError = err;
+        }
+      })();
 
       assert.equal(Object.keys(socketClusterClient.clients).length, 1);
       assert.equal(socketClusterClient.clients[client.clientId] === client, true);
 
-      socketClusterClient.destroy(client);
+      await socketClusterClient.destroy(client);
 
       assert.equal(Object.keys(socketClusterClient.clients).length, 0);
       assert.equal(socketClusterClient.clients[client.clientId], null);
-      done();
     });
 
-    it('Should destroy all references of socket when socketClusterClient.destroy(socket) is called if the socket was created with query parameters', function () {
+    it('Should destroy all references of socket when socketClusterClient.destroy(socket) is called if the socket was created with query parameters', async function () {
       var clientOptionsB = {
         hostname: '127.0.0.1',
         port: portNumber,
@@ -1101,29 +1125,16 @@ describe('Integration tests', function () {
 
       var clientB2 = socketClusterClient.create(clientOptionsB2);
 
-      return Promise.all([
-        new Promise(function (resolve) {
-          clientA.on('connect', function () {
-            resolve();
-          });
-        }),
-        new Promise(function (resolve) {
-          clientB.on('connect', function () {
-            resolve();
-          });
-        }),
-        new Promise(function (resolve) {
-          clientB2.on('connect', function () {
-            resolve();
-          });
-        })
-      ]).then(function () {
-        assert.equal(Object.keys(socketClusterClient.clients).length, 2);
-        clientA.destroy();
-        assert.equal(Object.keys(socketClusterClient.clients).length, 1);
-        clientB.destroy();
-        assert.equal(Object.keys(socketClusterClient.clients).length, 0);
-      });
+      await Promise.all([
+        clientA.listener('connect').once(),
+        clientB.listener('connect').once(),
+        clientB2.listener('connect').once()
+      ]);
+      assert.equal(Object.keys(socketClusterClient.clients).length, 2);
+      clientA.destroy();
+      assert.equal(Object.keys(socketClusterClient.clients).length, 1);
+      clientB.destroy();
+      assert.equal(Object.keys(socketClusterClient.clients).length, 0);
     });
   });
 
