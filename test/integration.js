@@ -539,7 +539,7 @@ describe('Integration tests', function () {
 
       assert.equal(client.authState, 'authenticated');
       assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
-      client.endListener('authStateChange');
+      client.closeListener('authStateChange');
     });
 
     it('Should go through the correct sequence of authentication state changes when dealing with disconnections; part 2', async function () {
@@ -760,7 +760,7 @@ describe('Integration tests', function () {
       })();
 
       await wait(1000);
-      client.endListener('authStateChange');
+      client.closeListener('authStateChange');
       assert.equal(JSON.stringify(authStateChanges), JSON.stringify(expectedAuthStateChanges));
     });
 
