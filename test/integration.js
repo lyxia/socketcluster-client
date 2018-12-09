@@ -91,7 +91,6 @@ describe('Integration tests', function () {
     clientOptions = {
       hostname: '127.0.0.1',
       port: portNumber,
-      multiplex: false,
       ackTimeout: 200
     };
 
@@ -109,9 +108,9 @@ describe('Integration tests', function () {
             client.listener('connectAbort').once()
           ])
         );
-        client.destroy();
+        client.disconnect();
       } else {
-        client.destroy();
+        client.disconnect();
       }
     }
     cleanupTasks.push(
@@ -125,26 +124,11 @@ describe('Integration tests', function () {
   });
 
   describe('Creation', function () {
-    it('Should reuse socket if multiplex is true and options are the same', async function () {
-      clientOptions = {
-        hostname: '127.0.0.1',
-        port: portNumber,
-        multiplex: true
-      };
-
-      var clientA = socketClusterClient.create(clientOptions);
-      var clientB = socketClusterClient.create(clientOptions);
-
-      assert.equal(clientA, clientB);
-      clientA.destroy();
-      clientB.destroy();
-    });
 
     it('Should automatically connect socket on creation by default', async function () {
       clientOptions = {
         hostname: '127.0.0.1',
-        port: portNumber,
-        multiplex: false
+        port: portNumber
       };
 
       client = socketClusterClient.create(clientOptions);
@@ -156,60 +140,12 @@ describe('Integration tests', function () {
       clientOptions = {
         hostname: '127.0.0.1',
         port: portNumber,
-        multiplex: false,
         autoConnect: false
       };
 
       client = socketClusterClient.create(clientOptions);
 
       assert.equal(client.state, client.CLOSED);
-    });
-
-    it('Should automatically connect socket if multiplex is true, autoConnect is set to false the first time and socket create is called with autoConnect true the second time', async function () {
-      var clientOptionsA = {
-        hostname: '127.0.0.1',
-        port: portNumber,
-        multiplex: true,
-        autoConnect: false
-      };
-
-      var clientA = socketClusterClient.create(clientOptionsA);
-
-      assert.equal(clientA.state, clientA.CLOSED);
-
-      var clientOptionsB = {
-        hostname: '127.0.0.1',
-        port: portNumber,
-        multiplex: true,
-        autoConnect: true
-      };
-
-      var clientB = socketClusterClient.create(clientOptionsB);
-
-      assert.equal(clientB.state, clientB.CONNECTING);
-
-      clientA.destroy();
-      clientB.destroy();
-    });
-
-    it('Should not automatically connect socket if multiplex is true, autoConnect is set to false and socket create is called a second time with autoConnect false', async function () {
-      clientOptions = {
-        hostname: '127.0.0.1',
-        port: portNumber,
-        multiplex: true,
-        autoConnect: false
-      };
-
-      var clientA = socketClusterClient.create(clientOptions);
-
-      assert.equal(clientA.state, clientA.CLOSED);
-
-      var clientB = socketClusterClient.create(clientOptions);
-
-      assert.equal(clientB.state, clientB.CLOSED);
-
-      clientA.destroy();
-      clientB.destroy();
     });
   });
 
@@ -271,9 +207,7 @@ describe('Integration tests', function () {
       // Change the setAuthKey to invalidate the current token.
       await client.invoke('setAuthKey', 'differentAuthKey');
 
-      await client.disconnect();
-
-
+      client.disconnect();
       client.connect();
 
       packet = await client.listener('connect').once();
@@ -340,8 +274,7 @@ describe('Integration tests', function () {
 
       client = socketClusterClient.create({
         hostname: clientOptions.hostname,
-        port: port,
-        multiplex: false
+        port: port
       });
 
       await client.listener('connect').once();
@@ -370,8 +303,7 @@ describe('Integration tests', function () {
 
       client = socketClusterClient.create({
         hostname: clientOptions.hostname,
-        port: port,
-        multiplex: false
+        port: port
       });
 
       await client.listener('connect').once();
@@ -401,8 +333,7 @@ describe('Integration tests', function () {
 
       client = socketClusterClient.create({
         hostname: clientOptions.hostname,
-        port: port,
-        multiplex: false
+        port: port
       });
 
       await client.listener('connect').once();
@@ -574,7 +505,7 @@ describe('Integration tests', function () {
 
       assert.equal(client.authState, 'authenticated');
 
-      await client.disconnect();
+      client.disconnect();
 
       assert.equal(client.authState, 'authenticated');
       await client.deauthenticate();
@@ -913,231 +844,6 @@ describe('Integration tests', function () {
     });
   });
 
-  describe('Destroying socket', function () {
-    it('Should disconnect socket when socket.destroy() is called', async function () {
-      client = socketClusterClient.create(clientOptions);
-
-      var clientError;
-      (async () => {
-        for await (let err of client.listener('error')) {
-          clientError = err;
-        }
-      })();
-
-      (async () => {
-        for await (let packet of client.listener('connect')) {
-          client.destroy();
-        }
-      })();
-
-      await client.listener('disconnect').once();
-    });
-
-    it('Should disconnect socket with custom code and data when socket.destroy() is called with arguments', async function () {
-      client = socketClusterClient.create(clientOptions);
-
-      var clientError;
-      (async () => {
-        for await (let err of client.listener('error')) {
-          clientError = err;
-        }
-      })();
-
-      (async () => {
-        for await (let packet of client.listener('connect')) {
-          client.destroy(4321, 'Custom disconnect reason');
-        }
-      })();
-
-      let packet = await client.listener('disconnect').once();
-      assert.equal(packet.code, 4321);
-      assert.equal(packet.data, 'Custom disconnect reason'); // TODO 2: Should it be packet.reason or packet.data
-    });
-
-    it('Should destroy all references of socket when socket.destroy() is called before connect', async function () {
-      client = socketClusterClient.create(clientOptions);
-
-      var clientError;
-      (async () => {
-        for await (let err of client.listener('error')) {
-          clientError = err;
-        }
-      })();
-
-      var connectAbortTriggered = false;
-      var disconnectTriggered = false;
-      var closeTriggered = false;
-
-      (async () => {
-        for await (let packet of client.listener('connectAbort')) {
-          connectAbortTriggered = true;
-        }
-      })();
-
-      (async () => {
-        for await (let packet of client.listener('disconnect')) {
-          disconnectTriggered = true;
-        }
-      })();
-
-      (async () => {
-        for await (let packet of client.listener('close')) {
-          closeTriggered = true;
-        }
-      })();
-
-      assert.equal(Object.keys(socketClusterClient.clients).length, 1);
-      assert.equal(socketClusterClient.clients[client.clientId] === client, true);
-
-      await client.destroy();
-
-      assert.equal(Object.keys(socketClusterClient.clients).length, 0);
-      assert.equal(socketClusterClient.clients[client.clientId], null);
-      assert.equal(connectAbortTriggered, true);
-      assert.equal(disconnectTriggered, false);
-      assert.equal(closeTriggered, true);
-    });
-
-    it('Should destroy all references of socket when socket.destroy() is called after connect', async function () {
-      client = socketClusterClient.create(clientOptions);
-
-      var clientError;
-      (async () => {
-        for await (let err of client.listener('error')) {
-          clientError = err;
-        }
-      })();
-
-      var connectAbortTriggered = false;
-      var disconnectTriggered = false;
-      var closeTriggered = false;
-
-      (async () => {
-        for await (let packet of client.listener('connectAbort')) {
-          connectAbortTriggered = true;
-        }
-      })();
-
-      (async () => {
-        for await (let packet of client.listener('disconnect')) {
-          disconnectTriggered = true;
-        }
-      })();
-
-      (async () => {
-        for await (let packet of client.listener('close')) {
-          closeTriggered = true;
-        }
-      })();
-
-      assert.equal(Object.keys(socketClusterClient.clients).length, 1);
-      assert.equal(socketClusterClient.clients[client.clientId] === client, true);
-
-      (async () => {
-        for await (let packet of client.listener('connect')) {
-          client.destroy();
-          assert.equal(Object.keys(socketClusterClient.clients).length, 0);
-          assert.equal(socketClusterClient.clients[client.clientId], null);
-          assert.equal(connectAbortTriggered, false);
-          assert.equal(disconnectTriggered, true);
-          assert.equal(closeTriggered, true);
-        }
-      })();
-    });
-
-    it('Should destroy all references of multiplexed socket when socket.destroy() is called', async function () {
-      clientOptions.multiplex = true;
-      var clientA = socketClusterClient.create(clientOptions);
-      var clientB = socketClusterClient.create(clientOptions);
-
-      var clientAError;
-      (async () => {
-        for await (let err of client.listener('error')) {
-          clientAError = err;
-        }
-      })();
-
-      var clientBError;
-      (async () => {
-        for await (let err of client.listener('error')) {
-          clientBError = err;
-        }
-      })();
-
-      assert.equal(clientA, clientB);
-
-      assert.equal(Object.keys(socketClusterClient.clients).length, 1);
-      assert.equal(socketClusterClient.clients[clientA.clientId] === clientA, true);
-
-      await clientA.destroy();
-
-      assert.equal(Object.keys(socketClusterClient.clients).length, 0);
-      assert.equal(socketClusterClient.clients[clientA.clientId], null);
-    });
-
-    it('Should destroy all references of socket when socketClusterClient.destroy(socket) is called', async function () {
-      client = socketClusterClient.create(clientOptions);
-
-      var clientError;
-      (async () => {
-        for await (let err of client.listener('error')) {
-          clientError = err;
-        }
-      })();
-
-      assert.equal(Object.keys(socketClusterClient.clients).length, 1);
-      assert.equal(socketClusterClient.clients[client.clientId] === client, true);
-
-      await socketClusterClient.destroy(client);
-
-      assert.equal(Object.keys(socketClusterClient.clients).length, 0);
-      assert.equal(socketClusterClient.clients[client.clientId], null);
-    });
-
-    it('Should destroy all references of socket when socketClusterClient.destroy(socket) is called if the socket was created with query parameters', async function () {
-      var clientOptionsB = {
-        hostname: '127.0.0.1',
-        port: portNumber,
-        multiplex: true,
-        ackTimeout: 200,
-        query: {foo: 123, bar: 456}
-      };
-
-      var clientA = socketClusterClient.create(clientOptionsB);
-
-      var clientOptionsB = {
-        hostname: '127.0.0.1',
-        port: portNumber,
-        multiplex: true,
-        ackTimeout: 200,
-        query: {foo: 123, bar: 789}
-      };
-
-      var clientB = socketClusterClient.create(clientOptionsB);
-
-      var clientOptionsB2 = {
-        hostname: '127.0.0.1',
-        port: portNumber,
-        multiplex: true,
-        ackTimeout: 200,
-        query: {foo: 123, bar: 789}
-      };
-
-      var clientB2 = socketClusterClient.create(clientOptionsB2);
-
-      await Promise.all([
-        clientA.listener('connect').once(),
-        clientB.listener('connect').once(),
-        clientB2.listener('connect').once()
-      ]);
-      assert.equal(Object.keys(socketClusterClient.clients).length, 2);
-      clientA.destroy();
-      assert.equal(Object.keys(socketClusterClient.clients).length, 1);
-      clientB.destroy();
-      assert.equal(Object.keys(socketClusterClient.clients).length, 0);
-    });
-  });
-
   describe('Order of events', function () {
     it('Should trigger unsubscribe event on channel before disconnect event', function (done) {
       client = socketClusterClient.create(clientOptions);
@@ -1270,95 +976,6 @@ describe('Integration tests', function () {
         assert.equal(fooEventTriggered, true);
         done();
       }, 1000);
-    });
-
-    it('Should emit an error event if transmit is called on a destroyed socket', function (done) {
-      client = socketClusterClient.create(clientOptions);
-      assert.equal(client.active, true);
-
-      var disconnectTriggered = false;
-      var secondConnectTriggered = false;
-      var clientError;
-      client.on('error', function (err) {
-        clientError = err;
-      });
-
-      client.once('connect', function () {
-        assert.equal(client.active, true);
-
-        client.once('disconnect', function () {
-          disconnectTriggered = true;
-          assert.equal(client.active, false);
-        });
-
-        client.destroy();
-        assert.equal(client.active, false);
-
-        client.once('connect', function () {
-          secondConnectTriggered = true;
-        });
-
-        client.transmit('foo', 123)
-        .then(() => {
-          return null;
-        })
-        .catch((err) => {
-          return err;
-        })
-        .then((err) => {
-          assert.notEqual(err, null);
-          assert.equal(err.name, 'InvalidActionError');
-        });
-
-        assert.equal(client.active, false);
-        assert.equal(client.state, client.CLOSED);
-      });
-
-      setTimeout(function () {
-        assert.equal(secondConnectTriggered, false);
-        assert.equal(disconnectTriggered, true);
-        assert.notEqual(clientError, null);
-        assert.equal(clientError.name, 'InvalidActionError');
-        done();
-      }, 100);
-    });
-
-    it('Should emit an error event if publish is called on a destroyed socket', function (done) {
-      client = socketClusterClient.create(clientOptions);
-      assert.equal(client.active, true);
-
-      var clientError;
-      client.on('error', (err) => {
-        clientError = err;
-      });
-
-      client.once('connect', () => {
-        assert.equal(client.active, true);
-
-        client.destroy();
-        assert.equal(client.active, false);
-
-        client.publish('thisIsATestChannel', 123)
-        .then(() => {
-          return null;
-        })
-        .catch((err) => {
-          return err;
-        })
-        .then((err) => {
-          assert.notEqual(err, null);
-          assert.equal(err.name, 'InvalidActionError');
-        });
-
-        assert.equal(client.active, false);
-        assert.equal(client.state, client.CLOSED);
-      });
-
-      setTimeout(() => {
-        assert.notEqual(clientError, null);
-        assert.equal(clientError.name, 'InvalidActionError');
-        done();
-      }, 100);
     });
 
     it('Should correctly handle multiple successive connect and disconnect calls', function (done) {
