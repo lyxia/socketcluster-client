@@ -845,91 +845,96 @@ describe('Integration tests', function () {
   });
 
   describe('Order of events', function () {
-    it('Should trigger unsubscribe event on channel before disconnect event', function (done) {
+    it('Should trigger unsubscribe event on channel before disconnect event', async function () {
       client = socketClusterClient.create(clientOptions);
       var hasUnsubscribed = false;
 
       var fooChannel = client.subscribe('foo');
-      fooChannel.on('subscribe', function () {
-        setTimeout(function () {
+
+      (async () => {
+        for await (let packet of fooChannel.listener('subscribe')) {
+          await wait(100);
           client.disconnect();
-        }, 100);
-      });
-      fooChannel.on('unsubscribe', function () {
-        hasUnsubscribed = true;
-      });
-      client.on('disconnect', function () {
-        assert.equal(hasUnsubscribed, true);
-        done();
-      });
+        }
+      })();
+
+      (async () => {
+        for await (let packet of fooChannel.listener('unsubscribe')) {
+          hasUnsubscribed = true;
+        }
+      })();
+
+      await client.listener('disconnect').once();
+      assert.equal(hasUnsubscribed, true);
     });
 
-    it('Should not invoke subscribeFail event if connection is aborted', function (done) {
+    it('Should not invoke subscribeFail event if connection is aborted', async function () {
       client = socketClusterClient.create(clientOptions);
       var hasSubscribeFailed = false;
       var gotBadConnectionError = false;
 
-      client.on('connect', () => {
-        client.invoke('someEvent', 123)
-        .catch((err) => {
-          if (err && err.name === 'BadConnectionError') {
-            gotBadConnectionError = true;
-          }
-        });
+      (async () => {
+        for await (let packet of client.listener('connect')) {
+          (async () => {
+            try {
+              await client.invoke('someEvent', 123);
+            } catch (err) {
+              if (err.name === 'BadConnectionError') {
+                gotBadConnectionError = true;
+              }
+            }
+          })();
 
-        var fooChannel = client.subscribe('foo');
+          var fooChannel = client.subscribe('foo');
+          (async () => {
+            for await (let packet of fooChannel.listener('subscribeFail')) {
+              hasSubscribeFailed = true;
+            }
+          })();
 
-        fooChannel.on('subscribeFail', () => {
-          hasSubscribeFailed = true;
-        });
-
-        client.on('close', () => {
-          setTimeout(() => {
-            assert.equal(gotBadConnectionError, true);
-            assert.equal(hasSubscribeFailed, false);
-            done();
-          }, 100);
-        });
-
-        setTimeout(() => {
+          await wait(0);
           client.disconnect();
-        }, 0);
-      });
+        }
+      })();
+
+      await client.listener('close').once();
+      await wait(100);
+      assert.equal(gotBadConnectionError, true);
+      assert.equal(hasSubscribeFailed, false);
     });
 
-    it('Should resolve invoke Promise with BadConnectionError after triggering the disconnect event', function (done) {
+    it('Should resolve invoke Promise with BadConnectionError after triggering the disconnect event', async function () {
       client = socketClusterClient.create(clientOptions);
       var messageList = [];
 
-      client.on('connect', () => {
-        client.disconnect();
-
-        setTimeout(() => {
-          assert.equal(messageList.length, 2);
-          assert.equal(messageList[0].type, 'disconnect');
-          assert.equal(messageList[1].type, 'error');
-          assert.equal(messageList[1].error.name, 'BadConnectionError');
-          done();
-        }, 200);
-      });
-
-      client.invoke('someEvent', 123)
-      .catch((err) => {
-        if (err) {
+      (async () => {
+        try {
+          await client.invoke('someEvent', 123);
+        } catch (err) {
           messageList.push({
             type: 'error',
             error: err
           });
         }
-      });
+      })();
 
-      client.on('disconnect', (code, reason) => {
-        messageList.push({
-          type: 'disconnect',
-          code: code,
-          reason: reason
-        });
-      });
+      (async () => {
+        for await (let packet of client.listener('disconnect')) {
+          messageList.push({
+            type: 'disconnect',
+            code: packet.code,
+            reason: packet.data
+          });
+        }
+      })();
+
+      await client.listener('connect').once();
+      client.disconnect();
+      await wait(200);
+      assert.equal(messageList.length, 2);
+      assert.equal(messageList[0].type, 'disconnect');
+      assert.equal(messageList[1].type, 'error');
+      assert.equal(messageList[1].error.name, 'BadConnectionError');
     });
 
     it('Should reconnect if transmit is called on a disconnected socket', function (done) {
